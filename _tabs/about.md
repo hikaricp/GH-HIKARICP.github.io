@@ -1,8 +1,8 @@
 ---
-title: About
+title: About1
 icon: fas fa-info-circle
 order: 4
 ---
 
 
-> **Note**: Add Markdown syntax content to file `_tabs/about.md` and it will show up on this page.
+> **以人为镜可以明得失，以代码为镜可以通逻辑.**
