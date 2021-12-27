@@ -1,0 +1,149 @@
+---
+layout: post
+title:  "Mybatis的一对一映射"
+date:   2021-12-27 20:34:08 +0800
+categories: [Mybatis]
+tags: [Mybatis]
+---
+
+## 一、自动别名映射
+
+> 例如： `r.role_name as 'role.role_name'`，会在类中查找role属性，如果这个属性存在就创建这个对象，然后在这个对象中查找roleName，将r.role_name绑定到role对象的roleName属性中
+
+```xml
+<select id="selectUserAndRoleById" resultType="cn.eaay.simple.dto.UserDto">
+    select u.id,
+           u.user_name     userName,
+           u.user_password userPassword,
+           u.user_email    userEmail,
+           u.user_info     userInfo,
+           u.head_img      headImg,
+           u.create_time   createTime,
+           r.id            'role.id', 
+           r.role_name     'role.roleName', 
+           r.enabled       'role.enabled', 
+           r.create_by     'role.createBy', 
+           r.create_time   'role.createTime'
+    from sys_user u
+             inner join sys_user_role ur on u.id = ur.user_id
+             inner join sys_role r on ur.role_id = r.id
+    where u.id = #{userId}
+</select>
+```
+
+**结论：通过自动别名映射可以完成一对一映射，要注意对象中role属性的运用，别名中要用'role.属性'，要加引号。**
+
+
+## 二、resultMap映射
+
+### 1、使用别名配置一对一映射
+
+> 在 resultMap标签中result的`property` 属性中使用 `role.` 前缀。在column中为了避免不同表中存在相同的列，在可能重名的列中添加前缀 `role_`。使用这种方式时还需要在sql中设置别名。
+
+```xml
+<resultMap id="userRoleMap" type="cn.eaay.simple.dto.UserDto" extends="userMap">
+    <!-- role相关属性 -->
+    <result column="role_id" property="role.id"/>
+    <result column="role_name" property="role.roleName"/>
+    <result column="enabled" property="role.enabled"/>
+    <result column="create_by" property="role.createBy"/>
+    <result column="role_create_time" property="role.createTime" jdbcType="TIMESTAMP"/>
+</resultMap>
+    
+<!-- sql中的别名要与column相同 -->
+<select id="selectUserAndRoleById2" resultMap="userRoleMap">
+    select u.id,
+           u.user_name,
+           u.user_password,
+           u.user_email,
+           u.user_info,
+           u.head_img,
+           u.create_time,
+           r.id          role_id,
+           r.role_name,
+           r.enabled     enabled,
+           r.create_by   create_by,
+           r.create_time role_create_time
+    from sys_user u
+             inner join sys_user_role ur on u.id = ur.user_id
+             inner join sys_role r on ur.role_id = r.id
+    where u.id = #{userId}
+</select>
+```
+
+**结论：这种方式需要在role的proerty中使用 "role." 前缀，在column中为了避免不同表中存在相同名称的列，增加了 "role_" 前缀，并且还在在sql语句中配置 "role_" 前缀，十分繁琐。**
+
+### 2、使用association标签配置一对一映射
+
+```xml
+<resultMap id="roleMap" type="cn.eaay.simple.model.SysRole">
+    <id column="id" property="id"/>
+    <result column="role_name" property="roleName"/>
+    <result column="enabled" property="enabled"/>
+    <result column="create_by" property="createBy"/>
+    <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+</resultMap>
+    
+<!-- association可以引用ResultMap-->
+<!-- columnPrefix配置别名前缀，在别名中使用，防止名称重复，注意 r.role_name也要加上前缀role_role_name -->
+<resultMap id="userRoleMapByAssociation2" type="cn.eaay.simple.dto.UserDto" extends="userMap">
+    <association property="role" columnPrefix="role_"
+                 resultMap="cn.eaay.simple.mapper.SysRoleMapper.roleMap"/>
+</resultMap>
+<!-- 使用ResultMap的association标签配置一对一映射 -->
+<select id="selectUserAndRoleById3" resultMap="userRoleMapByAssociation2">
+    select u.id,
+           u.user_name,
+           u.user_password,
+           u.user_email,
+           u.user_info,
+           u.head_img,
+           u.create_time,
+           r.id          role_id,
+           r.role_name   role_role_name,
+           r.enabled     role_enabled,
+           r.create_by   role_create_by,
+           r.create_time role_create_time
+    from sys_user u
+             inner join sys_user_role ur on u.id = ur.user_id
+             inner join sys_role r on ur.role_id = r.id
+    where u.id = #{userId}
+</select>
+```
+
+**结论：在resultMap中不仅可以使用继承的方式，association中也可以使用resultMap属性引用其它的resultMap，一目了然，简化并重用了代码**
+
+### 三、嵌套查询及延迟加载
+
+> 将主查询中列的结果作为嵌套查询的参数。
+> 嵌套查询会执行两次sql查询，第一次将主查询结果查询出来，注意主查询中存在一个roleId列，这是一个别名，也可以是数据库的字段role_id，与column的值对应。将association的column设置为roleId会将此作为参数来查询。
+> 触发某些方法时进行延迟加载，lazyLoadTriggerMethods="equals,clone,hashCode,toString"
+
+```xml
+<!-- 在mybatis配置文件，配置此选项 -->
+<setting name="lazyLoadTriggerMethods" value="equals,clone,hashCode,toString"/>
+```
+
+```xml
+<!-- association标签的嵌套查询 -->
+<resultMap id="userRoleMapSelect" type="cn.eaay.simple.dto.UserDto" extends="userMap">
+    <association property="role" column="roleId"
+                 select="cn.eaay.simple.mapper.SysRoleMapper.selectRoleById"/>
+</resultMap>
+<!-- 嵌套查询 -->
+<select id="selectUserAndRoleByIdSelect" resultMap="userRoleMapSelect">
+    select u.id,
+           u.user_name,
+           u.user_password,
+           u.user_email,
+           u.user_info,
+           u.head_img,
+           u.create_time,
+           ur.role_id roleId
+    from sys_user u
+             inner join sys_user_role ur on u.id = ur.user_id
+    where u.id = #{userId}
+</select>
+```
+
+**结论：在嵌套查询时要注意column属性的值是次查询的参数，要指定为主查询的列。通过指定延迟加载完成按需加载。**
